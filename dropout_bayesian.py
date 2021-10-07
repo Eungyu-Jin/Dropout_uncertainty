@@ -46,7 +46,7 @@ def dataset(label = '역률평균'):
 
     return ds
 
-def preprocess(df, label = '역률평균', timesteps = 12, predict_size = 1):
+def preprocess(df, label = '역률평균', timesteps = 24, predict_size = 1):
     # 12시간(timesteps) 전의 데이터를 참고 해 1시간 뒤(predict_size)를 예측하는 dataset을 생성 - train 데이터
     df = df.iloc[:,:-1]
     forecast_idx = df.columns.to_list().index(label)
@@ -58,7 +58,7 @@ def preprocess(df, label = '역률평균', timesteps = 12, predict_size = 1):
 
     # 정규화
     from sklearn.preprocessing import MinMaxScaler, StandardScaler
-    scaler = MinMaxScaler()
+    scaler = StandardScaler()
     train_scale = scaler.fit_transform(train_dataset) 
     test_scale = scaler.transform(test_dataset)
 
@@ -84,7 +84,7 @@ class Current():
         self.df = df
         self.label = '역률평균'
         self.units = 128 # LSTM 노드 수
-        self.dropout_rate = 0.25 # 랜덤으로 Dropout 할 비율
+        self.dropout_rate = 0.2 # 랜덤으로 Dropout 할 비율
         self.train_X, self.train_y, self.test_X, self.test_y, self.scaler = preprocess(self.df, label=self.label, timesteps=12, predict_size=1)
         self.input_shape = (self.train_X.shape[1],self.train_X.shape[2])
     
@@ -105,13 +105,12 @@ class Current():
     def LSTM(self):
         inputs = Input(shape=self.input_shape)
         # 양방향 LSTM 2층
-        x = Bidirectional(LSTM(self.units,activation='relu',input_shape=self.input_shape , return_sequences=True, dropout=self.dropout_rate, recurrent_dropout = self.dropout_rate))(inputs, training = True)
-        x = Bidirectional(LSTM(self.units,activation='relu',dropout=self.dropout_rate, recurrent_dropout = self.dropout_rate))(inputs, training = True)
-        
+        x = Bidirectional(LSTM(self.units,activation='relu',input_shape=self.input_shape , dropout=self.dropout_rate, recurrent_dropout = self.dropout_rate))(inputs, training = True)
+
         # 결과 값은 2개의 Dense 층으로 가는데 한 개는 평균, 한 개는 분산 값 계산을
-        mean = Dropout(rate=0.25)(x, training=True)
+        mean = Dropout(rate=0.2)(x, training=True)
         mean = Dense(self.train_y.shape[-1])(mean)
-        var = Dropout(rate=0.25)(x, training=True)
+        var = Dropout(rate=0.2)(x, training=True)
         var = Dense(self.train_y.shape[-1])(var)
         outputs = concatenate([mean, var])
         model = Model(inputs,outputs)
@@ -140,9 +139,7 @@ class Current():
         # 인코더가 LSTM
         inputs = Input(shape=self.input_shape)
         x = Bidirectional(LSTM(self.units, return_sequences=True,activation = 'relu', dropout = self.dropout_rate, recurrent_dropout = self.dropout_rate))(inputs, training = True)
-        x = Dropout(0.2)(x, training = True)
-        x = Bidirectional(LSTM(self.units, return_sequences=True,activation = 'relu', dropout = self.dropout_rate, recurrent_dropout = self.dropout_rate))(x, training = True)
-        x = Dropout(0.2)(x, training = True)
+        x = Bidirectional(LSTM(self.units, return_sequences=True,activation = 'relu', dropout = self.dropout_rate, recurrent_dropout = self.dropout_rate))(inputs, training = True)
 
         for _ in range(num_blocks):
             x = self.transformer_encoder(x, key_dim, num_heads, ff_dim)
@@ -151,9 +148,9 @@ class Current():
         max_pool = GlobalMaxPooling1D()(x)
         conc = concatenate([avg_pool, max_pool])
 
-        mean = Dropout(rate=0.25)(conc, training=True)
+        mean = Dropout(rate=0.2)(conc, training=True)
         mean = Dense(self.train_y.shape[-1])(mean)
-        var = Dropout(rate=0.25)(conc, training=True)
+        var = Dropout(rate=0.2)(conc, training=True)
         var = Dense(self.train_y.shape[-1])(var)
         outputs = concatenate([mean, var])
         model = Model(inputs,outputs)
@@ -165,10 +162,8 @@ class Current():
     def Transfomer_Conv(self, key_dim = 256, num_heads=2, ff_dim=128, num_blocks=1):
         # 인코더가 CNN
         inputs = Input(shape=self.input_shape)
-        x = Conv1D(filters=self.units, kernel_size=self.train_X.shape[1], strides = 1, activation = 'relu', padding='causal',dilation_rate=2)(inputs, training = True)
-        x = Dropout(0.25)(x, training = True)
-        x = Conv1D(filters=self.units, kernel_size=self.train_X.shape[1], strides = 1, activation = 'relu', padding='causal',dilation_rate=2)(x, training = True)
-        x = Dropout(0.25)(x, training = True)
+        x = Conv1D(filters=self.units, kernel_size=self.train_X.shape[1], strides = 1, activation = 'relu', padding='causal',dilation_rate=16)(inputs, training = True)
+        x = Dropout(0.2)(x, training = True)
 
         for _ in range(num_blocks):
             x = self.transformer_encoder(x, key_dim, num_heads, ff_dim)
@@ -177,9 +172,9 @@ class Current():
         max_pool = GlobalMaxPooling1D()(x)
         conc = concatenate([avg_pool, max_pool])
         
-        mean = Dropout(rate=0.25)(conc, training=True)
+        mean = Dropout(rate=0.2)(conc, training=True)
         mean = Dense(self.train_y.shape[-1])(mean)
-        var = Dropout(rate=0.25)(conc, training=True)
+        var = Dropout(rate=0.2)(conc, training=True)
         var = Dense(self.train_y.shape[-1])(var)
         outputs = concatenate([mean, var])
         model = Model(inputs,outputs)
@@ -244,13 +239,12 @@ class Current():
         print('r2: {}'.format(r2_score(self.test_y, y_mean)))
         print("For Uncertainty model, {} are in 99% confidence interval".format(np.mean(total)))
         
-        # 데이터의 지수평활 6시그마 계산
+        # 데이터의 3시그마 계산
         values = tf_predict[self.label].values
-        ewma = pd.DataFrame(values).ewm(alpha= 0.5).mean()
-        ewm_upper = np.mean(ewma) + 3 * np.std(ewma)
-        ewm_lower = np.mean(ewma) - 3 * np.std(ewma)
-        tf_predict['ewm_upper'] = ewm_upper[0]
-        tf_predict['ewm_lower'] = ewm_lower[0]
+        sigma_upper = np.mean(values) + 3 * np.std(values)
+        sigma_lower = np.mean(values) - 3 * np.std(values)
+        tf_predict['sigma_upper'] = np.mean(values) + 3 * np.std(values)
+        tf_predict['sigma_lower'] = np.mean(values) - 3 * np.std(values)
 
         # 모델 그래프 결과
         if show == True:
@@ -261,13 +255,13 @@ class Current():
             plt.figure(figsize=(12,8))
             plt.plot(tx, test_y_transfrom,'darkgreen')
             plt.plot(tx, y_mean_transfrom, 'orangered')
-            plt.hlines(ewm_upper[0], tx[0], tx[-1])
-            plt.hlines(ewm_lower[0], tx[0], tx[-1])
+            plt.hlines(sigma_upper, tx[0], tx[-1])
+            plt.hlines(sigma_lower, tx[0], tx[-1])
 
             plt.fill_between(tx, y1 = lower_transfrom.reshape(-1), y2= upper_transfrom.reshape(-1), color='lightskyblue')
             plt.xlabel('Time')
             plt.ylabel('Test')
-            plt.legend(['Test','Prediction','ewma'],loc='upper right')
+            plt.legend(['Test','Prediction','3sigma'],loc='upper right')
             plt.title('Test Predict')
             plt.show() 
         
