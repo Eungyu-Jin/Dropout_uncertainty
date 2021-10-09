@@ -83,7 +83,7 @@ class Current():
     def __init__(self, df):
         self.df = df
         self.label = '역률평균'
-        self.units = 256 # LSTM 노드 수
+        self.units = 128 # LSTM 노드 수
         self.dropout_rate = 0.2 # 랜덤으로 Dropout 할 비율
         self.train_X, self.train_y, self.test_X, self.test_y, self.scaler = preprocess(self.df, label=self.label, timesteps=12, predict_size=1)
         self.input_shape = (self.train_X.shape[1],self.train_X.shape[2])
@@ -105,8 +105,8 @@ class Current():
     def LSTM(self):
         inputs = Input(shape=self.input_shape)
         # 양방향 LSTM 2층
-        #x = Bidirectional(LSTM(self.units,activation='relu',input_shape=self.input_shape , return_sequences=True, dropout=self.dropout_rate, recurrent_dropout = self.dropout_rate))(inputs, training = True)
-        x = LSTM(self.units,activation='relu',input_shape=self.input_shape , dropout=self.dropout_rate, recurrent_dropout = self.dropout_rate)(inputs, training = True)
+        x = Bidirectional(LSTM(self.units,activation='relu',input_shape=self.input_shape , return_sequences=True, dropout=self.dropout_rate, recurrent_dropout = self.dropout_rate))(inputs, training = True)
+        x = Bidirectional(LSTM(self.units,activation='relu',input_shape=self.input_shape , dropout=self.dropout_rate, recurrent_dropout = self.dropout_rate))(inputs, training = True)
 
         # 결과 값은 2개의 Dense 층으로 가는데 한 개는 평균, 한 개는 분산 값 계산을
         mean = Dropout(rate=0.2)(x, training=True)
@@ -138,7 +138,8 @@ class Current():
     def Transfomer_LSTM(self, key_dim = 128, num_heads=2, ff_dim=128, num_blocks=1):
         # 인코더가 LSTM
         inputs = Input(shape=self.input_shape)
-        x = LSTM(self.units, return_sequences=True,activation = 'relu', dropout = self.dropout_rate, recurrent_dropout = self.dropout_rate)(inputs, training = True)
+        x = Bidirectional(LSTM(self.units, return_sequences=True,activation = 'relu', dropout = self.dropout_rate, recurrent_dropout = self.dropout_rate))(inputs, training = True)
+        x = Bidirectional(LSTM(self.units, return_sequences=True,activation = 'relu', dropout = self.dropout_rate, recurrent_dropout = self.dropout_rate))(x, training = True)
 
         for _ in range(num_blocks):
             x = self.transformer_encoder(x, key_dim, num_heads, ff_dim)
@@ -148,9 +149,9 @@ class Current():
         conc = concatenate([avg_pool, max_pool])
 
         mean = Dropout(rate=0.25)(conc, training=True)
-        mean = Dense(self.train_y.shape[-1])(mean)
+        mean = Dense(self.train_y.shape[-1], activation = 'linear')(mean)
         var = Dropout(rate=0.25)(conc, training=True)
-        var = Dense(self.train_y.shape[-1])(var)
+        var = Dense(self.train_y.shape[-1], activation = 'linear')(var)
         outputs = concatenate([mean, var])
         model = Model(inputs,outputs)
 
